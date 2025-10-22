@@ -6,7 +6,7 @@ on:
   workflow_dispatch: {}             # ручной запуск
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   run:
@@ -20,6 +20,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          persist-credentials: true
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -35,7 +37,23 @@ jobs:
             pip install requests
           fi
 
-      - name: Run checker (one-shot)
+      - name: Run checker (one-shot) and append to daily log
         run: |
           set -euo pipefail
-          python checker.py
+          mkdir -p logs
+          LOG="logs/$(date -u +%F).log"   # один файл на день (UTC)
+          {
+            echo "===== RUN $(date -u '+%Y-%m-%d %H:%M:%S UTC') ====="
+            python checker.py
+            echo
+          } | tee -a "$LOG"
+
+      - name: Commit & push logs
+        if: always()   # даже если предыдущий шаг упал — всё равно пушим то, что успели записать
+        run: |
+          set -euo pipefail
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add logs/*.log || true
+          git commit -m "Append log: $(date -u '+%F %T UTC') [skip ci]" || echo "No changes to commit"
+          git push
