@@ -71,7 +71,7 @@ def main():
         if isinstance(disp, list) and len(disp) > 0:
             print(f"[{time.strftime('%H:%M:%S')}] ЕСТЬ свободные места: {len(disp)}")
         else:
-            print(f"[{time.strftime('%H:%М:%S')}] Нет свободных мест.")
+            print(f"[{time.strftime('%H:%M:%S')}] Нет свободных мест.")
     except ValueError:
         print(f"[{time.strftime('%H:%M:%S')}] Ответ не JSON.")
 
