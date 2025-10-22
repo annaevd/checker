@@ -1,7 +1,7 @@
 name: SAE Checker
 on:
   schedule:
-    - cron: "*/15 * * * *"   # каждые 30 минут (UTC)
+    - cron: "*/3 * * * *"   # каждые 3 минут (UTC)
   workflow_dispatch: {}
 
 jobs:
