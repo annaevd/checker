@@ -1,20 +1,16 @@
 import sys
 import io
-# Жёсткий UTF-8 и построчный вывод
-if hasattr(sys.stdout, "buffer"):
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace", line_buffering=True)
-if hasattr(sys.stderr, "buffer"):
-    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace", line_buffering=True)
-
 import time
 import requests
 import urllib3
 import json
+# UTF-8 вывод
+if hasattr(sys.stdout, "buffer"):
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 URL = "https://bpmgob.mec.gub.uy/etapas/agenda_sae_api_disponibilidades"
-INTERVAL_SEC = 1800  # каждые 30 минут (1800 секунд)
 
 COOKIE = (
     "target_bal=!km1r9LB0E4JRgkfTTujzigjbW3HXOKyI8aPoEqjHSGto8q/X6UqB1rL11wWJSYkwHGrLiwlPOB30cg==; "
@@ -24,7 +20,7 @@ COOKIE = (
     "TS0191f197=01f421a8d8646634c941d42a3477b2d2b61c8af459a046e1b1ff0e53a054c6be779d0565e4bd7d99bf117920677bcb2a468550bd7e4da98c40d382e58fe92b3a29513acedb52e74467a25f5ce0a8f6f4ac87f080db; "
     "TS0191f197=018cd2258fb1355bfef6cf71371742ecd4365815baacade22a9328d5ead7ed86bba94ebb9ed20f47ca8c3f170827e30d64b0d978d9c514163310e46e101adf1a4d63d9979e65564e9ea24dee573f5423ca836171ae476f6b58c76ab3f061c19acf968e63e4; "
     "TS01d82af7=018cd2258f5cac424e21b1215ec05f710bd309c958acade22a9328d5ead7ed86bba94ebb9eaa7c6152d1ef5473842d7e82b52a9fc2; "
-    "simple_bpm_session=tRJKetlYbIh7smrUH15fXcx4rKGeco3WmyRs8L%2BfsZzouGOToU54h4cI4qiE8MT%2FefCg0zqRhU1TdWjavsbfd7B2DRgAmVSDEAVUNGq9EbzYczm2wLTA67z49u0MR31XE3HOVCmkWUkj1nVKRxT63TsDC3oJw5QgE1fxhQAVKHuCHpa%2Fp3HvWa63C2E4vK1jlrFU51gxl2W1F4EwNV5CxVQK3VFTovMYXDeeU9alr0agZ5YQOlJ7JcJ8gyauq3c4MFIn6AYUn1BJmB5TFucf8ScU6WXLlMiMCoAzgqFkspGZoq0N%2BK%2Fobzi7Kkd7Xla6YIQTu3OOEDu8HVeOpklJadnbBIwMy%2FqdKG8qkAHW8UAsSQCwLJONIsuFo2GSmUtm30JATpFSym5iy0kgHeJd5oIleq6io8ObispJNYtHIoNs6ug013sMkwGf03B2YS33uWbG2NsRB6qbSQ9oY%2BG8g%2FudqlvTu7I9EXe01KMRen%2FUcDoYQPqh%2F9%2FW5gyewGHxaf030d22893d748062f8a847602f697531b98cf0; "
+    "simple_bpm_session=tRJKetlYbIh7smrUH15fXcx4rKGeco3WmyRs8L%2BfsZzouGOToU54h4cI4qiE8MT%2FefCg0zqRhU1TdWjavsbfd7B2DRgAmVSDEAVUNGq9EbzYczm2wLTA67з49u0MR31XE3HOVCmkWUkj1nVKRxT63TsDC3oJw5QgE1fxhQAVKHuCHpa%2Fp3HvWa63C2E4vK1jlrFU51gxl2W1F4EwNV5CxVQK3VFTovMYXDeeU9alr0agZ5YQOlJ7JcJ8gyauq3c4MFIn6AYUn1BJmB5TFucf8ScU6WXLlMiMCoAzgqFkspGZoq0N%2BK%2Fobzi7Kkd7Xla6YIQTu3OOEDu8HVeOpklJadnbBIwMy%2FqdKG8qkAHW8UAsSQCwLJONIsuFo2GSmUtm30JATpFSym5iy0kgHeJd5oIleq6io8ObispJNYtHIoNs6ug013sMkwGf03B2YS33uWbG2NsRB6qbSQ9oY%2BG8g%2FudqlvTu7I9EXe01KMRen%2FUcDoYQPqh%2F9%2FW5gyewGHxaf030d22893d748062f8a847602f697531b98cf0; "
     "target_bal=!Rz3oe2yoTcefLI7TTujzigjbW3HXOD4PF9X7m1wXVRNiKAcXQEW5U9vgJD8zT08ww/Ko2TMIDAbmPA=="
 )
 
@@ -50,39 +46,22 @@ DATA = {
     "idioma": "es",
 }
 
-def log(msg: str):
-    print(f"[{time.strftime('%H:%M:%S')}] {msg}")
-
-def check_slots():
-    log("Старт запроса.")
-    try:
-        r = requests.post(URL, headers=HEADERS, data=DATA, timeout=30, verify=False)
-    except Exception as e:
-        log(f"Ошибка запроса: {e}")
-        return
-
-    log(f"HTTP {r.status_code}")
-
-    # Печатаем ответ полностью
+def main():
+    print(f"[{time.strftime('%H:%M:%S')}] Старт запроса.")
+    r = requests.post(URL, headers=HEADERS, data=DATA, timeout=40, verify=False)
+    print(f"[{time.strftime('%H:%M:%S')}] HTTP {r.status_code}")
     print("------ ОТВЕТ СЕРВЕРА ------")
     print(r.text)
     print("---------------------------")
-
     try:
-        data = r.json()
+        body = r.json()
+        disp = body.get("disponibilidades")
+        if isinstance(disp, list) and len(disp) > 0:
+            print(f"[{time.strftime('%H:%M:%S')}] ЕСТЬ свободные места: {len(disp)}")
+        else:
+            print(f"[{time.strftime('%H:%M:%S')}] Нет свободных мест.")
     except ValueError:
-        log("Ответ не JSON.")
-        return
-
-    disponibilidades = data.get("disponibilidades")
-    if isinstance(disponibilidades, list) and len(disponibilidades) > 0:
-        log(f"ЕСТЬ свободные места: {len(disponibilidades)}")
-    else:
-        log("Нет свободных мест.")
+        print(f"[{time.strftime('%H:%M:%S')}] Ответ не JSON.")
 
 if __name__ == "__main__":
-    log("Скрипт запущен. Первую проверку делаю сразу, затем каждые 30 минут.")
-    while True:
-        check_slots()
-        log(f"Пауза {INTERVAL_SEC} сек.")
-        time.sleep(INTERVAL_SEC)
+    main()
