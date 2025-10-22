@@ -4,7 +4,9 @@ import time
 import requests
 import urllib3
 import json
-# UTF-8 вывод
+from http.cookies import SimpleCookie
+
+# Нормальный UTF-8 вывод в лог
 if hasattr(sys.stdout, "buffer"):
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 
@@ -12,17 +14,27 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 URL = "https://bpmgob.mec.gub.uy/etapas/agenda_sae_api_disponibilidades"
 
-COOKIE = (
+# ВСТАВЬТЕ СЮДА СВЕЖИЙ COOKIE ИЗ БРАУЗЕРА (Ctrl+C из devtools -> Request headers -> Cookie)
+# Важно: строка ДОЛЖНА содержать ТОЛЬКО ASCII/percent-encoding (никаких кириллических букв!)
+COOKIE_RAW = (
     "target_bal=!km1r9LB0E4JRgkfTTujzigjbW3HXOKyI8aPoEqjHSGto8q/X6UqB1rL11wWJSYkwHGrLiwlPOB30cg==; "
     "simple_bpm_query=ZnJvbnRlbmQ%3D; simple_bpm_location=aHR0cHM6Ly9icG1nb2IubWVjLmd1Yi51eS90cmFtaXRlcy9kaXNwb25pYmxlcw%3D%3D; "
     "simple_bpm_login_cuenta_id=1; TS01d82af7=01f421a8d87cd47503004e1eadf87838ba059c8027a046e1b1ff0e53a054c6be779d0565e43120cac69af2c717c2885b69a7da3fa8; "
-    "simple_bpm_session=cjd98oOLpmaKRTcwzrSp2H%2BiPPQCA%2B7PdCctDenR1eCXPsPzj%2BLmty8nrvrRVExhoQMq9%2FDzzQnmVPxjiTjvRwDuF49iArH6OvWLW5SSzpJwsGkdVE0Mw8YWBBHBxGU3KEMKD9xDOAHR4FtZx3uK1cQyXaqv%2BT936SclxSxiqjvT9JyPYi4dmUkGRt1kr1Aimn4S3g7bpN30hQf%2FQ9skXJzCsa0CDVd5u4O1GcTINv6tXyMtFZQfyDDF1%2BOtFYzonKJq5iPrECLnVJuDilaaAiV1smzfeOqv36CeyiSZ5k4pheDT9RKQTaHUBos9UpmD4zANZxHY8GY6vtR%2Bcf%2BQ%2BgtgiER9GV9SK4HnNzZI8I2BleZXbIMMjG%2FQ5R3wNgbzT%2Bmgk9dxg8h8MwXRCFw7v2YH9PxaNefXHMLhCA86JepTHMzJ1gG1pyD6sKJXrLKxZ3IPA3%2Bvfn4OBPpuMvoa7QTp9Y%2FaYu%2FulyL3vyyInLd5jXKm0DerSBat8yKaUQpYI7UL127g%2BbogjnoGiXdB04n2wb1DOjkfy%2B0dG0LyW29RUUOHLkHLMitTiKwb39H%2BC6jbPKv3lPV5eTdAyWHkkA%3D%3D13fa268f2bf04b9d9e3531ec013e09c4162ecaea; "
+    "simple_bpm_session=cjd98oOLpmaKRTcwzrSp2H%2BiPPQCA%2B7PdCctDenR1eCXPsPzj%2BLmty8nrvrRVExhoQMq9%2FDzzQnmVPxjiTjvRwDuF49iArH6OvWLW5SSzpJwsGkdVE0Mw8YWBBHBxGU3KEMKD9xDOAHR4FtZx3uK1cQyXaqv%2BT936SclxSxiqjvT9JyPYi4dmUkGRt1kr1Aimn4S3g7bpN30hQf%2FQ9skXJzCsa0CDVd5u4O1GcTINv6tXyMtFZQfyDDF1%2BOtFYzonKJq5iPrECLnVJuDilaaAiV1smzfeOqv36CeyiSZ5k4pheDT9RKQTaHUBos9UpmD4зANZxHY8GY6vtR%2Bcf%2BQ%2BgtgiER9GV9SK4HnNzZI8I2BleZXbIMMjG%2FQ5R3wNgbzT%2Bmgk9dxg8h8MwXRCFw7v2YH9PxaNefXHMLhCA86JepTHMzJ1gG1pyD6sKJXrLKxZ3IPA3%2Bvfn4OBPpuMvoa7QTp9Y%2FaYu%2FulyL3vyyInLd5jXKm0DerSBat8yKaUQpYI7UL127g%2BbogjnoGiXdB04n2wb1DOjkfy%2B0dG0LyW29RUUOHLkHLMitTiKwb39H%2BC6jbPKv3lPV5eTdAyWHkkA%3D%3D13fa268f2bf04b9d9e3531ec013e09c4162ecaea; "
     "TS0191f197=01f421a8d8646634c941d42a3477b2d2b61c8af459a046e1b1ff0e53a054c6be779d0565e4bd7d99bf117920677bcb2a468550bd7e4da98c40d382e58fe92b3a29513acedb52e74467a25f5ce0a8f6f4ac87f080db; "
     "TS0191f197=018cd2258fb1355bfef6cf71371742ecd4365815baacade22a9328d5ead7ed86bba94ebb9ed20f47ca8c3f170827e30d64b0d978d9c514163310e46e101adf1a4d63d9979e65564e9ea24dee573f5423ca836171ae476f6b58c76ab3f061c19acf968e63e4; "
     "TS01d82af7=018cd2258f5cac424e21b1215ec05f710bd309c958acade22a9328d5ead7ed86bba94ebb9eaa7c6152d1ef5473842d7e82b52a9fc2; "
-    "simple_bpm_session=tRJKetlYbIh7smrUH15fXcx4rKGeco3WmyRs8L%2BfsZzouGOToU54h4cI4qiE8MT%2FefCg0zqRhU1TdWjavsbfd7B2DRgAmVSDEAVUNGq9EbzYczm2wLTA67з49u0MR31XE3HOVCmkWUkj1nVKRxT63TsDC3oJw5QgE1fxhQAVKHuCHpa%2Fp3HvWa63C2E4vK1jlrFU51gxl2W1F4EwNV5CxVQK3VFTovMYXDeeU9alr0agZ5YQOlJ7JcJ8gyauq3c4MFIn6AYUn1BJmB5TFucf8ScU6WXLlMiMCoAzgqFkspGZoq0N%2BK%2Fobzi7Kkd7Xla6YIQTu3OOEDu8HVeOpklJadnbBIwMy%2FqdKG8qkAHW8UAsSQCwLJONIsuFo2GSmUtm30JATpFSym5iy0kgHeJd5oIleq6io8ObispJNYtHIoNs6ug013sMkwGf03B2YS33uWbG2NsRB6qbSQ9oY%2BG8g%2FudqlvTu7I9EXe01KMRen%2FUcDoYQPqh%2F9%2FW5gyewGHxaf030d22893d748062f8a847602f697531b98cf0; "
+    "simple_bpm_session=tRJKetlYbIh7smrUH15fXcx4rKGeco3WmyRs8L%2BfsZzouGOToU54h4cI4qiE8MT%2FefCg0zqRhU1TdWjavsbfd7B2DRgAmVSDEAVUNGq9EbzYczm2wLTA67z49u0MR31XE3HOVCmkWUkj1nVKRxT63TsDC3oJw5QgE1fxhQAVKHuCHpa%2Fp3HvWa63C2E4vK1jlrFU51gxl2W1F4EwNV5CxVQK3VFTovMYXDeeU9alr0agZ5YQOlJ7JcJ8gyauq3c4MFIn6AYUn1BJmB5TFucf8ScU6WXLlMiMCoAzgqFkspGZoq0N%2BK%2Fobzi7Kkd7Xla6YIQTu3OOEDu8HVeOpklJadnbBIwMy%2FqdKG8qkAHW8UAsSQCwLJONIsuFo2GSmUtm30JATpFSym5iy0kgHeJd5oIleq6io8ObispJNYtHIoNs6ug013sMkwGf03B2YS33uWbG2NsRB6qbSQ9oY%2BG8g%2FudqlvTu7I9EXe01KMRen%2FUcDoYQPqh%2F9%2FW5gyewGHxaf030d22893d748062f8a847602f697531b98cf0; "
     "target_bal=!Rz3oe2yoTcefLI7TTujzigjbW3HXOD4PF9X7m1wXVRNiKAcXQEW5U9vgJD8zT08ww/Ko2TMIDAbmPA=="
 )
+
+# --- формируем cookie-jar (без заголовка Cookie в headers) ---
+jar = requests.cookies.RequestsCookieJar()
+# аккуратно распарсим строку cookie в пары name=value
+c = SimpleCookie()
+c.load(COOKIE_RAW)
+for key in c.keys():
+    jar.set(key, c[key].value)
 
 HEADERS = {
     "Accept": "application/json, text/javascript, */*; q=0.01",
@@ -33,8 +45,8 @@ HEADERS = {
     "Referer": "https://bpmgob.mec.gub.uy/etapas/ejecutar/296310/1",
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36",
     "X-Requested-With": "XMLHttpRequest",
-    "Cookie": COOKIE,
 }
+# ВАЖНО: НЕ добавляем сюда "Cookie": ...
 
 DATA = {
     "method": "POST",
@@ -48,7 +60,7 @@ DATA = {
 
 def main():
     print(f"[{time.strftime('%H:%M:%S')}] Старт запроса.")
-    r = requests.post(URL, headers=HEADERS, data=DATA, timeout=40, verify=False)
+    r = requests.post(URL, headers=HEADERS, data=DATA, cookies=jar, timeout=40, verify=False)
     print(f"[{time.strftime('%H:%M:%S')}] HTTP {r.status_code}")
     print("------ ОТВЕТ СЕРВЕРА ------")
     print(r.text)
@@ -59,7 +71,7 @@ def main():
         if isinstance(disp, list) and len(disp) > 0:
             print(f"[{time.strftime('%H:%M:%S')}] ЕСТЬ свободные места: {len(disp)}")
         else:
-            print(f"[{time.strftime('%H:%M:%S')}] Нет свободных мест.")
+            print(f"[{time.strftime('%H:%М:%S')}] Нет свободных мест.")
     except ValueError:
         print(f"[{time.strftime('%H:%M:%S')}] Ответ не JSON.")
 
