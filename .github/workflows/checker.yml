@@ -5,23 +5,14 @@ on:
     - cron: "*/3 * * * *"          # каждые 3 минуты (UTC)
   workflow_dispatch: {}             # ручной запуск
 
-# Чтоб любой сбой ронял шаг и не было «подвешенных» процессов
-defaults:
-  run:
-    shell: bash -euo pipefail
-
-# Минимально необходимые права
 permissions:
   contents: read
 
 jobs:
   run:
     runs-on: ubuntu-latest
-
-    # Жёсткий лимит — если сайт/сеть подвисли, ран сам оборвётся
     timeout-minutes: 10
 
-    # Анти-дубликаты: один запуск на ветку; новый отменит старый
     concurrency:
       group: ${{ github.workflow }}-${{ github.ref_name }}
       cancel-in-progress: true
@@ -37,6 +28,7 @@ jobs:
 
       - name: Install deps
         run: |
+          set -euo pipefail
           if [ -f requirements.txt ]; then
             pip install -r requirements.txt
           else
@@ -44,4 +36,6 @@ jobs:
           fi
 
       - name: Run checker (one-shot)
-        run: python checker.py
+        run: |
+          set -euo pipefail
+          python checker.py
