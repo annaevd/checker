@@ -2,7 +2,7 @@ name: SAE Checker
 
 on:
   schedule:
-    - cron: "*/2 * * * *"          # каждые 3 минуты (UTC)
+    - cron: "*/3 * * * *"          # каждые 2 минуты (UTC)
   workflow_dispatch: {}             # ручной запуск
 
 permissions:
@@ -50,7 +50,7 @@ jobs:
             echo
           } | tee -a "$LOG" | tee "$RUN_OUT" >/dev/null
 
-      - name: Send run.out to Telegram
+      - name: Send log text to Telegram (chunked)
         if: always()
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
@@ -61,14 +61,35 @@ jobs:
             echo "Telegram secrets not set, skipping."
             exit 0
           fi
-          CAPTION="SAE checker log ($(date -u '+%Y-%m-%d %H:%M:%S UTC'))"
-          curl -sS -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendDocument" \
-            -F chat_id="${CHAT_ID}" \
-            -F caption="${CAPTION}" \
-            -F document=@run.out >/dev/null || echo "Telegram send failed"
+
+          # Разбиваем run.out на куски <= 3500 символов (UTF-8, по символам, не по байтам)
+          python - <<'PY'
+import math
+path = 'run.out'
+with open(path, 'r', encoding='utf-8', errors='replace') as f:
+    text = f.read()
+MAX = 3500  # запас до лимита 4096
+chunks = [text[i:i+MAX] for i in range(0, len(text), MAX)] or ['(empty)']
+n = len(chunks)
+for i, ch in enumerate(chunks, 1):
+    prefix = f"[{i}/{n}] " if n > 1 else ""
+    with open(f'chunk_{i:03}.txt', 'w', encoding='utf-8') as out:
+        out.write(prefix + ch)
+print(n)
+PY
+
+          # Отправляем каждый кусок как текстовое сообщение
+          for f in chunk_*.txt; do
+            [ -e "$f" ] || continue
+            curl -sS "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
+              --data-urlencode "chat_id=${CHAT_ID}" \
+              --data-urlencode "text=$(cat "$f")" \
+              --data "disable_web_page_preview=true" \
+              >/dev/null || echo "Telegram send failed for $f"
+          done
 
       - name: Commit & push logs
-        if: always()
+        if: always()   # даже если предыдущий шаг упал — всё равно пушим то, что успели записать
         run: |
           set -euo pipefail
           git config user.name  "github-actions[bot]"
