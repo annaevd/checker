@@ -2,7 +2,7 @@ name: SAE Checker
 
 on:
   schedule:
-    - cron: "*/2 * * * *"          # каждые 2 минуты (UTC)
+    - cron: "*/3 * * * *"          # каждые 3 минуты (UTC)
   workflow_dispatch: {}             # ручной запуск
 
 permissions:
@@ -50,7 +50,7 @@ jobs:
             echo
           } | tee -a "$LOG" | tee "$RUN_OUT" >/dev/null
 
-      - name: Send log text to Telegram (chunked)
+      - name: Send log text to Telegram if slots found (chunked)
         if: always()
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
@@ -62,7 +62,13 @@ jobs:
             exit 0
           fi
 
-          # Разбиваем run.out на куски <= 3500 символов и сохраняем в chunk_*.txt
+          # Отправляем только если в этом запуске встречалась фраза "ЕСТЬ свободные места"
+          if ! grep -q "ЕСТЬ свободные места" run.out; then
+            echo "No slots found in this run. Skipping Telegram."
+            exit 0
+          fi
+
+          # Разбиваем run.out на части <= 3500 символов и сохраняем в chunk_*.txt
           rm -f chunk_*.txt || true
           awk -v max=3500 '
             BEGIN{c=1; l=0; fn=sprintf("chunk_%03d.txt",c)}
@@ -78,7 +84,7 @@ jobs:
           i=0; n=$(ls -1 chunk_*.txt 2>/dev/null | wc -l | xargs)
           for f in chunk_*.txt; do
             i=$((i+1))
-            # Добавим префикс [i/n] для наглядности
+            # Префикс [i/n], чтобы в чате было понятно, сколько сообщений в серии
             printf "[%d/%d] " "$i" "$n" | cat - "$f" > "${f}.send"
             mv "${f}.send" "$f"
 
@@ -90,7 +96,7 @@ jobs:
           done
 
       - name: Commit & push logs
-        if: always()
+        if: always()   # даже если предыдущий шаг упал — всё равно пушим то, что успели записать
         run: |
           set -euo pipefail
           git config user.name  "github-actions[bot]"
