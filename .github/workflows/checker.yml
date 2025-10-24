@@ -62,23 +62,26 @@ jobs:
             exit 0
           fi
 
-          # Разбиваем run.out на части <= 3500 символов и сохраняем во временные файлы
+          # Разбиваем run.out на куски <= 3500 символов и сохраняем в chunk_*.txt
           rm -f chunk_*.txt || true
-          python -c "import sys, pathlib
-from pathlib import Path
-p = Path('run.out')
-text = p.read_text(encoding='utf-8', errors='replace') if p.exists() else ''
-MAX = 3500
-chunks = [text[i:i+MAX] for i in range(0, len(text), MAX)] or ['(empty)']
-n = len(chunks)
-for i, ch in enumerate(chunks, 1):
-    prefix = f'[{i}/{n}] ' if n > 1 else ''
-    Path(f'chunk_{i:03}.txt').write_text(prefix + ch, encoding='utf-8')
-"
+          awk -v max=3500 '
+            BEGIN{c=1; l=0; fn=sprintf("chunk_%03d.txt",c)}
+            {
+              line=$0 ORS
+              if (l + length($0) + 1 > max) { c++; fn=sprintf("chunk_%03d.txt",c); l=0 }
+              printf "%s", line >> fn
+              l += length($0) + 1
+            }
+          ' run.out
 
-          # Шлём каждый кусок как обычное сообщение
           shopt -s nullglob
+          i=0; n=$(ls -1 chunk_*.txt 2>/dev/null | wc -l | xargs)
           for f in chunk_*.txt; do
+            i=$((i+1))
+            # Добавим префикс [i/n] для наглядности
+            printf "[%d/%d] " "$i" "$n" | cat - "$f" > "${f}.send"
+            mv "${f}.send" "$f"
+
             curl -sS "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
               --data-urlencode "chat_id=${CHAT_ID}" \
               --data-urlencode "text@${f}" \
@@ -87,7 +90,7 @@ for i, ch in enumerate(chunks, 1):
           done
 
       - name: Commit & push logs
-        if: always()   # даже если предыдущий шаг упал — всё равно пушим то, что успели записать
+        if: always()
         run: |
           set -euo pipefail
           git config user.name  "github-actions[bot]"
