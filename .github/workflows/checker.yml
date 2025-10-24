@@ -2,7 +2,7 @@ name: SAE Checker
 
 on:
   schedule:
-    - cron: "*/3 * * * *"          # каждые 3 минуты (UTC)
+    - cron: "*/2 * * * *"          # каждые 3 минуты (UTC)
   workflow_dispatch: {}             # ручной запуск
 
 permissions:
@@ -38,18 +38,37 @@ jobs:
           fi
 
       - name: Run checker (one-shot) and append to daily log
+        id: run_checker
         run: |
           set -euo pipefail
           mkdir -p logs
           LOG="logs/$(date -u +%F).log"   # один файл на день (UTC)
+          RUN_OUT="run.out"
           {
             echo "===== RUN $(date -u '+%Y-%m-%d %H:%M:%S UTC') ====="
             python checker.py
             echo
-          } | tee -a "$LOG"
+          } | tee -a "$LOG" | tee "$RUN_OUT" >/dev/null
+
+      - name: Send run.out to Telegram
+        if: always()
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
+        run: |
+          set -euo pipefail
+          if [ -z "${BOT_TOKEN:-}" ] || [ -z "${CHAT_ID:-}" ]; then
+            echo "Telegram secrets not set, skipping."
+            exit 0
+          fi
+          CAPTION="SAE checker log ($(date -u '+%Y-%m-%d %H:%M:%S UTC'))"
+          curl -sS -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendDocument" \
+            -F chat_id="${CHAT_ID}" \
+            -F caption="${CAPTION}" \
+            -F document=@run.out >/dev/null || echo "Telegram send failed"
 
       - name: Commit & push logs
-        if: always()   # даже если предыдущий шаг упал — всё равно пушим то, что успели записать
+        if: always()
         run: |
           set -euo pipefail
           git config user.name  "github-actions[bot]"
