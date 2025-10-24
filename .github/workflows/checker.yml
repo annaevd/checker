@@ -2,7 +2,7 @@ name: SAE Checker
 
 on:
   schedule:
-    - cron: "*/3 * * * *"          # каждые 3 минуты (UTC)
+    - cron: "*/2 * * * *"          # каждые 2 минуты (UTC)
   workflow_dispatch: {}             # ручной запуск
 
 permissions:
