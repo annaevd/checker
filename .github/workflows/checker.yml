@@ -2,7 +2,7 @@ name: SAE Checker
 
 on:
   schedule:
-    - cron: "*/3 * * * *"          # каждые 2 минуты (UTC)
+    - cron: "*/3 * * * *"          # каждые 3 минуты (UTC)
   workflow_dispatch: {}             # ручной запуск
 
 permissions:
@@ -62,28 +62,26 @@ jobs:
             exit 0
           fi
 
-          # Разбиваем run.out на куски <= 3500 символов (UTF-8, по символам, не по байтам)
-          python - <<'PY'
-import math
-path = 'run.out'
-with open(path, 'r', encoding='utf-8', errors='replace') as f:
-    text = f.read()
-MAX = 3500  # запас до лимита 4096
+          # Разбиваем run.out на части <= 3500 символов и сохраняем во временные файлы
+          rm -f chunk_*.txt || true
+          python -c "import sys, pathlib
+from pathlib import Path
+p = Path('run.out')
+text = p.read_text(encoding='utf-8', errors='replace') if p.exists() else ''
+MAX = 3500
 chunks = [text[i:i+MAX] for i in range(0, len(text), MAX)] or ['(empty)']
 n = len(chunks)
 for i, ch in enumerate(chunks, 1):
-    prefix = f"[{i}/{n}] " if n > 1 else ""
-    with open(f'chunk_{i:03}.txt', 'w', encoding='utf-8') as out:
-        out.write(prefix + ch)
-print(n)
-PY
+    prefix = f'[{i}/{n}] ' if n > 1 else ''
+    Path(f'chunk_{i:03}.txt').write_text(prefix + ch, encoding='utf-8')
+"
 
-          # Отправляем каждый кусок как текстовое сообщение
+          # Шлём каждый кусок как обычное сообщение
+          shopt -s nullglob
           for f in chunk_*.txt; do
-            [ -e "$f" ] || continue
             curl -sS "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
               --data-urlencode "chat_id=${CHAT_ID}" \
-              --data-urlencode "text=$(cat "$f")" \
+              --data-urlencode "text@${f}" \
               --data "disable_web_page_preview=true" \
               >/dev/null || echo "Telegram send failed for $f"
           done
