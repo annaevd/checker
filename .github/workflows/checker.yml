@@ -27,15 +27,13 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+          cache: "pip"                       # NEW: вкл. кэш pip
+          cache-dependency-path: "requirements.txt"  # NEW: ключ = хэш этого файла
 
       - name: Install deps
         run: |
           set -euo pipefail
-          if [ -f requirements.txt ]; then
-            pip install -r requirements.txt
-          else
-            pip install requests
-          fi
+          pip install -r requirements.txt
 
       - name: Run checker (one-shot) and append to daily log
         id: run_checker
