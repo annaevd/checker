@@ -1,0 +1,14 @@
+===== RUN 2025-10-25 00:42:44 UTC =====
+[00:42:44] [REQ#1] Старт запроса.
+[00:42:46] [REQ#1] HTTP 200
+------ ОТВЕТ СЕРВЕРА (REQ#1) ------
+{"textoAgendaPaso2":"","textoRecursoPaso2":null,"disponibilidades":[]}
+------------------------------------
+[00:42:46] [REQ#1] Нет свободных мест.
+[00:42:46] [REQ#2] Старт запроса.
+[00:42:47] [REQ#2] HTTP 200
+------ ОТВЕТ СЕРВЕРА (REQ#2) ------
+{"textoAgendaPaso2":"SOLO REALICE UNA RESERVA si cuenta con toda la \r\ndocumentaci\u00f3n en forma, ya que una vez abonada \r\nno habr\u00e1 devoluciones.","textoRecursoPaso2":null,"disponibilidades":[]}
+------------------------------------
+[00:42:47] [REQ#2] Нет свободных мест.
+
