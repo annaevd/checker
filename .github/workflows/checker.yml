@@ -2,7 +2,7 @@ name: SAE Checker
 
 on:
   schedule:
-    - cron: "*/2 * * * *"          # каждые 2 минуты (UTC)
+    - cron: "*/2 * * * *"          # каждые 2 минуты (UTC, может «плавать»)
   workflow_dispatch: {}             # ручной запуск
 
 permissions:
@@ -20,6 +20,7 @@ jobs:
     env:
       VENV_DIR: .venv
       PYTHON_VERSION: "3.11"
+      TZ: America/Montevideo       # <-- локальный часовой пояс для bash/date
 
     steps:
       - name: Checkout
@@ -30,7 +31,6 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
-      # Кэш pip (колесики) — ускоряет установку при промахе venv
       - name: Restore pip cache
         uses: actions/cache@v4
         with:
@@ -39,7 +39,6 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-pip-${{ env.PYTHON_VERSION }}-
 
-      # Кэш самого виртуального окружения — главный буст
       - name: Restore venv cache
         id: venv-cache
         uses: actions/cache@v4
@@ -60,10 +59,10 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p logs
-          LOG="logs/$(date -u +%F).log"
+          LOG="logs/$(date +%F).log"   # файл дня по локальному TZ
           RUN_OUT="run.out"
           {
-            echo "===== RUN $(date -u '+%Y-%m-%d %H:%M:%S UTC') ====="
+            echo "===== RUN $(date '+%Y-%m-%d %H:%M:%S %Z') ====="  # локальное время, не UTC
             "${VENV_DIR}/bin/python" checker.py
             echo
           } | tee -a "$LOG" | tee "$RUN_OUT" >/dev/null
@@ -116,5 +115,5 @@ jobs:
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -f logs/*.log || true
-          git commit -m "Append log: $(date -u '+%F %T UTC') [skip ci]" || echo "No changes to commit"
+          git commit -m "Append log: $(date '+%F %T %Z') [skip ci]" || echo "No changes to commit"
           git push
