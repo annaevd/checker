@@ -1,6 +1,5 @@
 import sys
 import io
-import time
 import requests
 import urllib3
 from datetime import datetime
@@ -16,7 +15,7 @@ URL = "https://bpmgob.mec.gub.uy/etapas/agenda_sae_api_disponibilidades"
 
 # Локальное время (Монтевидео)
 TZ = ZoneInfo("America/Montevideo")
-def ts():
+def ts() -> str:
     return datetime.now(TZ).strftime("%H:%M:%S")
 
 # Минимальные заголовки
@@ -24,7 +23,7 @@ HEADERS_BASE = {
     "Accept": "application/json",
     "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "X-Requested-With": "XMLHttpRequest",
+    "X-Requested-With": "XMLHttpRequest",  # оставляем, т.к. у тебя он был в рабочем curl
 }
 
 # ---------- ЗАПРОС #1 (agenda=82, recurso=213) ----------
