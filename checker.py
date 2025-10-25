@@ -12,12 +12,13 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 URL = "https://bpmgob.mec.gub.uy/etapas/agenda_sae_api_disponibilidades"
 
-# Минимальные «нейтральные» заголовки 
+# Минимальные «нейтральные» заголовки (без Referer/Origin/Accept-Language/Connection/кук)
 HEADERS_BASE = {
     "Accept": "application/json",
     "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "X-Requested-With": "XMLHttpRequest",  
+    "X-Requested-With": "XMLHttpRequest",  # оставляем, т.к. у тебя в рабочем curl он есть
+}
 
 # ---------- ЗАПРОС #1 (agenda=82, recurso=213) ----------
 DATA_1 = {
@@ -77,8 +78,8 @@ def send_one(name: str, data: dict):
         print(f"[{time.strftime('%H:%M:%S')}] [{name}] Нет свободных мест.")
 
 def main():
-    send_one("REQ#1", DATA_1)
-    send_one("REQ#2",  DATA_2)
+    send_one("REQ#1 agenda=82 recurso=213", DATA_1)
+    send_one("REQ#2 agenda=7 recurso=214",  DATA_2)
 
 if __name__ == "__main__":
     main()
