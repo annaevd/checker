@@ -2765,3 +2765,16 @@
 {"textoAgendaPaso2":"","textoRecursoPaso2":null,"disponibilidades":[]}
 ------------------------------------
 [07:22:15] [REQ#2 agenda=7 recurso=214] Нет свободных мест.
+===== RUN 2025-10-25 07:24:16 -03 (minute 32/350, iter 17) =====
+[07:24:16] [REQ#1 agenda=82 recurso=213] Старт запроса.
+[07:24:17] [REQ#1 agenda=82 recurso=213] HTTP 200
+------ ОТВЕТ СЕРВЕРА (REQ#1 agenda=82 recurso=213) ------
+{"textoAgendaPaso2":"SOLO REALICE UNA RESERVA si cuenta con toda la \r\ndocumentaci\u00f3n en forma, ya que una vez abonada \r\nno habr\u00e1 devoluciones.","textoRecursoPaso2":null,"disponibilidades":[]}
+------------------------------------
+[07:24:17] [REQ#1 agenda=82 recurso=213] Нет свободных мест.
+[07:24:17] [REQ#2 agenda=7 recurso=214] Старт запроса.
+[07:24:19] [REQ#2 agenda=7 recurso=214] HTTP 200
+------ ОТВЕТ СЕРВЕРА (REQ#2 agenda=7 recurso=214) ------
+{"textoAgendaPaso2":"","textoRecursoPaso2":null,"disponibilidades":[]}
+------------------------------------
+[07:24:19] [REQ#2 agenda=7 recurso=214] Нет свободных мест.
