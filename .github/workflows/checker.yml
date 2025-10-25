@@ -1,25 +1,23 @@
 name: SAE Checker
 
 on:
-  # Специально без cron — запускаем вручную 1 раз,
-  # дальше джоба сама себя перезапускает бесконечно.
-  workflow_dispatch: {}
+  workflow_dispatch: {}        # запускаем 1 раз руками; дальше — самоперезапуск
 
 permissions:
-  contents: write
-  actions: write   # нужно, чтобы GITHUB_TOKEN мог инициировать новый запуск
+  contents: write              # для коммита логов
+  actions: write               # для self-dispatch
 
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 360       # максимум для одного job — 6 часов
+    timeout-minutes: 360       # максимум одного job — 6 часов
 
     concurrency:
       group: ${{ github.workflow }}-${{ github.ref_name }}
-      cancel-in-progress: true # новый запуск аккуратно прерывает текущий (страховка от дублей)
+      cancel-in-progress: true
 
     env:
-      TZ: America/Montevideo   # локальное время в логах bash
+      TZ: America/Montevideo
       PYTHON_VERSION: "3.11"
       VENV_DIR: .venv
 
@@ -32,7 +30,6 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
-      # Кэш колёс pip — ускоряет установку при промахе venv
       - name: Restore pip cache
         uses: actions/cache@v4
         with:
@@ -41,7 +38,6 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-pip-${{ env.PYTHON_VERSION }}-
 
-      # Кэшируем всё виртуальное окружение
       - name: Restore venv cache
         id: venv-cache
         uses: actions/cache@v4
@@ -57,7 +53,13 @@ jobs:
           "${VENV_DIR}/bin/python" -m pip install -U pip
           "${VENV_DIR}/bin/pip" install -r requirements.txt
 
-      - name: Run checker long loop (~2 min cadence for ~5h50m) + Telegram on slot
+      - name: Configure git for commits
+        run: |
+          set -euo pipefail
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Run checker long loop (~2 min cadence) + per-iteration commit + Telegram on slot
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
@@ -70,6 +72,7 @@ jobs:
           START_EPOCH=$(date +%s)
           MAX_MIN=350  # ~5 ч 50 мин
 
+          iter=0
           while :; do
             NOW=$(date +%s)
             ELAPSED_MIN=$(( (NOW - START_EPOCH) / 60 ))
@@ -78,13 +81,19 @@ jobs:
               break
             fi
 
-            echo "===== RUN $(date '+%Y-%m-%d %H:%M:%S %Z') (minute ${ELAPSED_MIN}/${MAX_MIN}) =====" | tee -a "$LOG"
+            iter=$((iter+1))
+            echo "===== RUN $(date '+%Y-%m-%d %H:%M:%S %Z') (minute ${ELAPSED_MIN}/${MAX_MIN}, iter ${iter}) =====" | tee -a "$LOG"
             RUN_OUT="run.out"
 
-            # запуск чекера; и в общий лог, и в run.out (для TG-уведомления)
+            # 1) Запускаем чекер: и в общий лог, и в run.out
             "${VENV_DIR}/bin/python" checker.py | tee -a "$LOG" | tee "$RUN_OUT" >/dev/null
 
-            # в Telegram шлём ТОЛЬКО если есть слоты в этом запуске
+            # 2) Коммитим и пушим лог после каждой итерации
+            git add -f "$LOG" || true
+            git commit -m "Append log: $(date '+%F %T %Z') [iter ${iter}] [skip ci]" || echo "No changes to commit"
+            git push || echo "Push failed (network hiccup?)"
+
+            # 3) В Telegram шлём ТОЛЬКО если найдены слоты
             if [ -n "${BOT_TOKEN:-}" ] && [ -n "${CHAT_ID:-}" ] && grep -q "ЕСТЬ свободные места" "$RUN_OUT"; then
               rm -f chunk_*.txt || true
               awk -v max=3500 'BEGIN{c=1;l=0;fn=sprintf("chunk_%03d.txt",c)}
@@ -104,18 +113,9 @@ jobs:
               rm -f chunk_*.txt
             fi
 
+            # 4) Пауза ~2 мин до следующей итерации
             sleep "$SLEEP_SEC"
           done
-
-      - name: Commit & push logs
-        if: always()
-        run: |
-          set -euo pipefail
-          git config user.name  "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -f logs/*.log || true
-          git commit -m "Append log: $(date '+%F %T %Z') [skip ci]" || echo "No changes to commit"
-          git push
 
       - name: Self-dispatch next run (immediate restart)
         if: always()
@@ -123,7 +123,6 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          # Запускаем этот же workflow ещё раз на той же ветке
           curl -sS -X POST \
             -H "Authorization: Bearer ${GH_TOKEN}" \
             -H "Accept: application/vnd.github+json" \
