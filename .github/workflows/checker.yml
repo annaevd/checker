@@ -1,26 +1,27 @@
 name: SAE Checker
 
 on:
-  schedule:
-    - cron: "*/2 * * * *"          # каждые 2 минуты (UTC, может «плавать»)
-  workflow_dispatch: {}             # ручной запуск
+  # Специально без cron — запускаем вручную 1 раз,
+  # дальше джоба сама себя перезапускает бесконечно.
+  workflow_dispatch: {}
 
 permissions:
   contents: write
+  actions: write   # нужно, чтобы GITHUB_TOKEN мог инициировать новый запуск
 
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 360       # максимум для одного job — 6 часов
 
     concurrency:
       group: ${{ github.workflow }}-${{ github.ref_name }}
-      cancel-in-progress: true
+      cancel-in-progress: true # новый запуск аккуратно прерывает текущий (страховка от дублей)
 
     env:
-      VENV_DIR: .venv
+      TZ: America/Montevideo   # локальное время в логах bash
       PYTHON_VERSION: "3.11"
-      TZ: America/Montevideo       # <-- локальный часовой пояс для bash/date
+      VENV_DIR: .venv
 
     steps:
       - name: Checkout
@@ -31,6 +32,7 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
+      # Кэш колёс pip — ускоряет установку при промахе venv
       - name: Restore pip cache
         uses: actions/cache@v4
         with:
@@ -39,6 +41,7 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-pip-${{ env.PYTHON_VERSION }}-
 
+      # Кэшируем всё виртуальное окружение
       - name: Restore venv cache
         id: venv-cache
         uses: actions/cache@v4
@@ -54,58 +57,54 @@ jobs:
           "${VENV_DIR}/bin/python" -m pip install -U pip
           "${VENV_DIR}/bin/pip" install -r requirements.txt
 
-      - name: Run checker (one-shot) and append to daily log
-        id: run_checker
-        run: |
-          set -euo pipefail
-          mkdir -p logs
-          LOG="logs/$(date +%F).log"   # файл дня по локальному TZ
-          RUN_OUT="run.out"
-          {
-            echo "===== RUN $(date '+%Y-%m-%d %H:%M:%S %Z') ====="  # локальное время, не UTC
-            "${VENV_DIR}/bin/python" checker.py
-            echo
-          } | tee -a "$LOG" | tee "$RUN_OUT" >/dev/null
-
-      - name: Send log text to Telegram if slots found (chunked)
-        if: always()
+      - name: Run checker long loop (~2 min cadence for ~5h50m) + Telegram on slot
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
+        timeout-minutes: 355
         run: |
           set -euo pipefail
-          if [ -z "${BOT_TOKEN:-}" ] || [ -z "${CHAT_ID:-}" ]; then
-            echo "Telegram secrets not set, skipping."
-            exit 0
-          fi
+          mkdir -p logs
+          LOG="logs/$(date +%F).log"
+          SLEEP_SEC=120
+          START_EPOCH=$(date +%s)
+          MAX_MIN=350  # ~5 ч 50 мин
 
-          if ! grep -q "ЕСТЬ свободные места" run.out; then
-            echo "No slots found in this run. Skipping Telegram."
-            exit 0
-          fi
+          while :; do
+            NOW=$(date +%s)
+            ELAPSED_MIN=$(( (NOW - START_EPOCH) / 60 ))
+            if [ "$ELAPSED_MIN" -ge "$MAX_MIN" ]; then
+              echo "Reached ${MAX_MIN} minutes; exiting loop." | tee -a "$LOG"
+              break
+            fi
 
-          rm -f chunk_*.txt || true
-          awk -v max=3500 '
-            BEGIN{c=1; l=0; fn=sprintf("chunk_%03d.txt",c)}
-            {
-              line=$0 ORS
-              if (l + length($0) + 1 > max) { c++; fn=sprintf("chunk_%03d.txt",c); l=0 }
-              printf "%s", line >> fn
-              l += length($0) + 1
-            }
-          ' run.out
+            echo "===== RUN $(date '+%Y-%m-%d %H:%M:%S %Z') (minute ${ELAPSED_MIN}/${MAX_MIN}) =====" | tee -a "$LOG"
+            RUN_OUT="run.out"
 
-          shopt -s nullglob
-          i=0; n=$(ls -1 chunk_*.txt 2>/dev/null | wc -l | xargs)
-          for f in chunk_*.txt; do
-            i=$((i+1))
-            printf "[%d/%d] " "$i" "$n" | cat - "$f" > "${f}.send"
-            mv "${f}.send" "$f"
-            curl -sS "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
-              --data-urlencode "chat_id=${CHAT_ID}" \
-              --data-urlencode "text@${f}" \
-              --data "disable_web_page_preview=true" \
-              >/dev/null || echo "Telegram send failed for $f"
+            # запуск чекера; и в общий лог, и в run.out (для TG-уведомления)
+            "${VENV_DIR}/bin/python" checker.py | tee -a "$LOG" | tee "$RUN_OUT" >/dev/null
+
+            # в Telegram шлём ТОЛЬКО если есть слоты в этом запуске
+            if [ -n "${BOT_TOKEN:-}" ] && [ -n "${CHAT_ID:-}" ] && grep -q "ЕСТЬ свободные места" "$RUN_OUT"; then
+              rm -f chunk_*.txt || true
+              awk -v max=3500 'BEGIN{c=1;l=0;fn=sprintf("chunk_%03d.txt",c)}
+                {line=$0 ORS; if (l+length($0)+1>max){c++;fn=sprintf("chunk_%03d.txt",c);l=0}
+                 printf "%s", line >> fn; l+=length($0)+1 }' "$RUN_OUT"
+
+              shopt -s nullglob
+              idx=0; total=$(ls -1 chunk_*.txt 2>/dev/null | wc -l | xargs)
+              for f in chunk_*.txt; do
+                idx=$((idx+1))
+                printf "[%d/%d] " "$idx" "$total" | cat - "$f" > "${f}.send" && mv "${f}.send" "$f"
+                curl -sS "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
+                  --data-urlencode "chat_id=${CHAT_ID}" \
+                  --data-urlencode "text@${f}" \
+                  --data "disable_web_page_preview=true" >/dev/null || echo "Telegram send failed for $f"
+              done
+              rm -f chunk_*.txt
+            fi
+
+            sleep "$SLEEP_SEC"
           done
 
       - name: Commit & push logs
@@ -117,3 +116,16 @@ jobs:
           git add -f logs/*.log || true
           git commit -m "Append log: $(date '+%F %T %Z') [skip ci]" || echo "No changes to commit"
           git push
+
+      - name: Self-dispatch next run (immediate restart)
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          # Запускаем этот же workflow ещё раз на той же ветке
+          curl -sS -X POST \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/${{ github.repository }}/actions/workflows/checker.yml/dispatches \
+            -d "{\"ref\":\"${{ github.ref_name }}\"}"
