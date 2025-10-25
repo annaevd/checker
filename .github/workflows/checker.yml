@@ -17,34 +17,54 @@ jobs:
       group: ${{ github.workflow }}-${{ github.ref_name }}
       cancel-in-progress: true
 
+    env:
+      VENV_DIR: .venv
+      PYTHON_VERSION: "3.11"
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          persist-credentials: true
 
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
-          cache: "pip"                       # NEW: вкл. кэш pip
-          cache-dependency-path: "requirements.txt"  # NEW: ключ = хэш этого файла
+          python-version: ${{ env.PYTHON_VERSION }}
 
-      - name: Install deps
+      # Кэш pip (колесики) — ускоряет установку при промахе venv
+      - name: Restore pip cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ env.PYTHON_VERSION }}-${{ hashFiles('requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-${{ env.PYTHON_VERSION }}-
+
+      # Кэш самого виртуального окружения — главный буст
+      - name: Restore venv cache
+        id: venv-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.VENV_DIR }}
+          key: ${{ runner.os }}-venv-${{ env.PYTHON_VERSION }}-${{ hashFiles('requirements.txt') }}
+
+      - name: Create venv & install deps (only on cache miss)
+        if: steps.venv-cache.outputs.cache-hit != 'true'
         run: |
           set -euo pipefail
-          pip install -r requirements.txt
+          python -m venv "${VENV_DIR}"
+          "${VENV_DIR}/bin/python" -m pip install -U pip
+          "${VENV_DIR}/bin/pip" install -r requirements.txt
 
       - name: Run checker (one-shot) and append to daily log
         id: run_checker
         run: |
           set -euo pipefail
           mkdir -p logs
-          LOG="logs/$(date -u +%F).log"   # один файл на день (UTC)
+          LOG="logs/$(date -u +%F).log"
           RUN_OUT="run.out"
           {
             echo "===== RUN $(date -u '+%Y-%m-%d %H:%M:%S UTC') ====="
-            python checker.py
+            "${VENV_DIR}/bin/python" checker.py
             echo
           } | tee -a "$LOG" | tee "$RUN_OUT" >/dev/null
 
@@ -60,13 +80,11 @@ jobs:
             exit 0
           fi
 
-          # Отправляем только если в этом запуске встречалась фраза "ЕСТЬ свободные места"
           if ! grep -q "ЕСТЬ свободные места" run.out; then
             echo "No slots found in this run. Skipping Telegram."
             exit 0
           fi
 
-          # Разбиваем run.out на части <= 3500 символов и сохраняем в chunk_*.txt
           rm -f chunk_*.txt || true
           awk -v max=3500 '
             BEGIN{c=1; l=0; fn=sprintf("chunk_%03d.txt",c)}
@@ -82,10 +100,8 @@ jobs:
           i=0; n=$(ls -1 chunk_*.txt 2>/dev/null | wc -l | xargs)
           for f in chunk_*.txt; do
             i=$((i+1))
-            # Префикс [i/n], чтобы в чате было понятно, сколько сообщений в серии
             printf "[%d/%d] " "$i" "$n" | cat - "$f" > "${f}.send"
             mv "${f}.send" "$f"
-
             curl -sS "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
               --data-urlencode "chat_id=${CHAT_ID}" \
               --data-urlencode "text@${f}" \
@@ -94,7 +110,7 @@ jobs:
           done
 
       - name: Commit & push logs
-        if: always()   # даже если предыдущий шаг упал — всё равно пушим то, что успели записать
+        if: always()
         run: |
           set -euo pipefail
           git config user.name  "github-actions[bot]"
