@@ -94,7 +94,7 @@ jobs:
             git push || echo "Push failed (network hiccup?)"
 
             # 3) В Telegram шлём ТОЛЬКО если найдены слоты
-            if [ -n "${BOT_TOKEN:-}" ] && [ -n "${CHAT_ID:-}" ] && grep -q "Нет свободных мест" "$RUN_OUT"; then
+            if [ -n "${BOT_TOKEN:-}" ] && [ -n "${CHAT_ID:-}" ] && grep -q "ЕСТЬ свободные места" "$RUN_OUT"; then
               rm -f chunk_*.txt || true
               awk -v max=3500 'BEGIN{c=1;l=0;fn=sprintf("chunk_%03d.txt",c)}
                 {line=$0 ORS; if (l+length($0)+1>max){c++;fn=sprintf("chunk_%03d.txt",c);l=0}
