@@ -2949,3 +2949,16 @@
 {"textoAgendaPaso2":"","textoRecursoPaso2":null,"disponibilidades":[]}
 ------------------------------------
 [12:15:25] [REQ#2 agenda=7 recurso=214] Нет свободных мест.
+===== RUN 2025-10-29 12:17:26 -03 (minute 115/350, iter 57) =====
+[12:17:26] [REQ#1 agenda=82 recurso=213] Старт запроса.
+[12:17:28] [REQ#1 agenda=82 recurso=213] HTTP 200
+------ ОТВЕТ СЕРВЕРА (REQ#1 agenda=82 recurso=213) ------
+{"textoAgendaPaso2":"SOLO REALICE UNA RESERVA si cuenta con toda la \r\ndocumentaci\u00f3n en forma, ya que una vez abonada \r\nno habr\u00e1 devoluciones.","textoRecursoPaso2":null,"disponibilidades":[{"20251106":{"10:30":{"id":"1936154","cupo":1},"10:45":{"id":"1936155","cupo":2},"11:00":{"id":"1936156","cupo":2},"11:15":{"id":"1936157","cupo":1},"11:30":{"id":"1936158","cupo":1},"12:00":{"id":"1936159","cupo":0},"12:30":{"id":"1936160","cupo":0},"13:00":{"id":"1936161","cupo":0}}},{"20251111":{"10:30":{"id":"1936162","cupo":1},"10:45":{"id":"1936163","cupo":2},"11:00":{"id":"1936164","cupo":2},"11:15":{"id":"1936165","cupo":2},"11:30":{"id":"1936166","cupo":0},"12:00":{"id":"1936167","cupo":0},"12:30":{"id":"1936168","cupo":0},"13:00":{"id":"1936169","cupo":0}}},{"20251113":{"10:30":{"id":"1936170","cupo":0},"10:45":{"id":"1936171","cupo":2},"11:00":{"id":"1936172","cupo":2},"11:15":{"id":"1936173","cupo":2},"11:30":{"id":"1936174","cupo":2},"12:00":{"id":"1936175","cupo":0},"12:30":{"id":"1936176","cupo":0},"13:00":{"id":"1936177","cupo":0}}}]}
+------------------------------------
+[12:17:28] [REQ#1 agenda=82 recurso=213] ЕСТЬ свободные места: 3
+[12:17:28] [REQ#2 agenda=7 recurso=214] Старт запроса.
+[12:17:29] [REQ#2 agenda=7 recurso=214] HTTP 200
+------ ОТВЕТ СЕРВЕРА (REQ#2 agenda=7 recurso=214) ------
+{"textoAgendaPaso2":"","textoRecursoPaso2":null,"disponibilidades":[]}
+------------------------------------
+[12:17:29] [REQ#2 agenda=7 recurso=214] Нет свободных мест.
