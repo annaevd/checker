@@ -5016,3 +5016,16 @@
 {"textoAgendaPaso2":"","textoRecursoPaso2":null,"disponibilidades":[]}
 ------------------------------------
 [16:32:20] [REQ#2 agenda=7 recurso=214] Нет свободных мест.
+===== RUN 2025-10-31 16:34:21 -03 (minute 90/350, iter 45) =====
+[16:34:21] [REQ#1 agenda=82 recurso=213] Старт запроса.
+[16:34:23] [REQ#1 agenda=82 recurso=213] HTTP 200
+------ ОТВЕТ СЕРВЕРА (REQ#1 agenda=82 recurso=213) ------
+{"textoAgendaPaso2":"SOLO REALICE UNA RESERVA si cuenta con toda la \r\ndocumentaci\u00f3n en forma, ya que una vez abonada \r\nno habr\u00e1 devoluciones.","textoRecursoPaso2":null,"disponibilidades":[]}
+------------------------------------
+[16:34:23] [REQ#1 agenda=82 recurso=213] Нет свободных мест.
+[16:34:23] [REQ#2 agenda=7 recurso=214] Старт запроса.
+[16:34:24] [REQ#2 agenda=7 recurso=214] HTTP 200
+------ ОТВЕТ СЕРВЕРА (REQ#2 agenda=7 recurso=214) ------
+{"textoAgendaPaso2":"","textoRecursoPaso2":null,"disponibilidades":[]}
+------------------------------------
+[16:34:24] [REQ#2 agenda=7 recurso=214] Нет свободных мест.
