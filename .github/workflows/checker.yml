@@ -1,20 +1,20 @@
 name: SAE Checker
 
 on:
-  workflow_dispatch: {}        # запускаем 1 раз руками; дальше — самоперезапуск
+  workflow_dispatch: {}
 
 permissions:
-  contents: write              # для коммита логов
-  actions: write               # для self-dispatch
+  contents: write
+  actions: write
 
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 360       # максимум одного job — 6 часов
+    timeout-minutes: 360
 
     concurrency:
       group: ${{ github.workflow }}-${{ github.ref_name }}
-      cancel-in-progress: true
+      cancel-in-progress: false
 
     env:
       TZ: America/Montevideo
@@ -70,7 +70,7 @@ jobs:
           LOG="logs/$(date +%F).log"
           SLEEP_SEC=120
           START_EPOCH=$(date +%s)
-          MAX_MIN=350  # ~5 ч 50 мин
+          MAX_MIN=350
 
           iter=0
           while :; do
@@ -85,15 +85,12 @@ jobs:
             echo "===== RUN $(date '+%Y-%m-%d %H:%M:%S %Z') (minute ${ELAPSED_MIN}/${MAX_MIN}, iter ${iter}) =====" | tee -a "$LOG"
             RUN_OUT="run.out"
 
-            # 1) Запускаем чекер: и в общий лог, и в run.out
             "${VENV_DIR}/bin/python" checker.py | tee -a "$LOG" | tee "$RUN_OUT" >/dev/null
 
-            # 2) Коммитим и пушим лог после каждой итерации
             git add -f "$LOG" || true
             git commit -m "Append log: $(date '+%F %T %Z') [iter ${iter}] [skip ci]" || echo "No changes to commit"
             git push || echo "Push failed (network hiccup?)"
 
-            # 3) В Telegram шлём ТОЛЬКО если найдены слоты
             if [ -n "${BOT_TOKEN:-}" ] && [ -n "${CHAT_ID:-}" ] && grep -q "ЕСТЬ свободные места" "$RUN_OUT"; then
               rm -f chunk_*.txt || true
               awk -v max=3500 'BEGIN{c=1;l=0;fn=sprintf("chunk_%03d.txt",c)}
@@ -113,18 +110,100 @@ jobs:
               rm -f chunk_*.txt
             fi
 
-            # 4) Пауза ~2 мин до следующей итерации
             sleep "$SLEEP_SEC"
           done
 
-      - name: Self-dispatch next run (immediate restart)
+      - name: Self-dispatch next run if none queued
         if: always()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BRANCH: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+          WF_FILE: checker.yml
         run: |
           set -euo pipefail
+          LOG="logs/$(date +%F).log"
+          mkdir -p logs
+
+          api() { curl -fsS -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" "$@"; }
+
+          Q=$(api "https://api.github.com/repos/${REPO}/actions/workflows/${WF_FILE}/runs?branch=${BRANCH}&status=queued&per_page=1" \
+             | grep -o '"total_count":[0-9]*' | head -1 | cut -d: -f2)
+          I=$(api "https://api.github.com/repos/${REPO}/actions/workflows/${WF_FILE}/runs?branch=${BRANCH}&status=in_progress&per_page=2" \
+             | grep -o '"total_count":[0-9]*' | head -1 | cut -d: -f2)
+          Q=${Q:-0}; I=${I:-0}
+          echo "[SELF-DISPATCH] $(date '+%Y-%m-%d %H:%M:%S %Z') queued=${Q}, in_progress=${I}" | tee -a "$LOG"
+
+          if [ "$Q" -gt 0 ] || [ "$I" -gt 1 ]; then
+            echo "[SELF-DISPATCH] skip dispatch (already queued/in_progress)" | tee -a "$LOG"
+            exit 0
+          fi
+
           curl -sS -X POST \
             -H "Authorization: Bearer ${GH_TOKEN}" \
             -H "Accept: application/vnd.github+json" \
-            https://api.github.com/repos/${{ github.repository }}/actions/workflows/checker.yml/dispatches \
-            -d "{\"ref\":\"${{ github.ref_name }}\"}"
+            "https://api.github.com/repos/${REPO}/actions/workflows/${WF_FILE}/dispatches" \
+            -d "{\"ref\":\"${BRANCH}\"}"
+          echo "[SELF-DISPATCH] dispatched new run" | tee -a "$LOG"
+
+      - name: Wait for next run up to 5 min; alert if not started
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
+          BRANCH: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+          WF_FILE: checker.yml
+          CUR_RUN: ${{ github.run_number }}
+        run: |
+          set -euo pipefail
+          LOG="logs/$(date +%F).log"
+          mkdir -p logs
+
+          check_started() {
+            local q i
+            q=$(curl -fsS -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" \
+                "https://api.github.com/repos/${REPO}/actions/workflows/${WF_FILE}/runs?branch=${BRANCH}&status=queued&per_page=1" \
+                | grep -o '"total_count":[0-9]*' | head -1 | cut -d: -f2)
+            i=$(curl -fsS -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" \
+                "https://api.github.com/repos/${REPO}/actions/workflows/${WF_FILE}/runs?branch=${BRANCH}&status=in_progress&per_page=2" \
+                | grep -o '"total_count":[0-9]*' | head -1 | cut -d: -f2)
+            q=${q:-0}; i=${i:-0}
+            if [ "$q" -gt 0 ] || [ "$i" -gt 1 ]; then return 0; else return 1; fi
+          }
+
+          echo "[WATCHDOG] $(date '+%Y-%m-%d %H:%M:%S %Z') waiting up to 5 min for next run..." | tee -a "$LOG"
+
+          tries=30
+          for n in $(seq 1 $tries); do
+            if check_started; then
+              echo "[WATCHDOG] next run detected" | tee -a "$LOG"
+              exit 0
+            fi
+            sleep 10
+          done
+
+          echo "[WATCHDOG] next run NOT detected within 5 minutes" | tee -a "$LOG"
+
+          if [ -n "${BOT_TOKEN:-}" ] && [ -n "${CHAT_ID:-}" ]; then
+            TEXT="SAE Checker: следующий запуск не стартовал в течение 5 минут после self-dispatch.
+Ветка: ${BRANCH}
+Репозиторий: ${REPO}
+Текущий run: ${CUR_RUN}
+Время: $(date '+%Y-%m-%d %H:%M:%S %Z')"
+            curl -sS "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
+              --data-urlencode "chat_id=${CHAT_ID}" \
+              --data-urlencode "text=${TEXT}" \
+              --data "disable_web_page_preview=true" >/dev/null || true
+          else
+            echo "[WATCHDOG] Telegram secrets not set; cannot alert." | tee -a "$LOG"
+          fi
+
+      - name: Commit & push logs (final)
+        if: always()
+        run: |
+          set -euo pipefail
+          git add -f logs/*.log || true
+          git commit -m "Append log (final): $(date '+%F %T %Z') [skip ci]" || echo "No changes to commit"
+          git push || echo "Push failed (final)"
