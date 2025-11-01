@@ -45,7 +45,7 @@ jobs:
           path: ${{ env.VENV_DIR }}
           key: ${{ runner.os }}-venv-${{ env.PYTHON_VERSION }}-${{ hashFiles('requirements.txt') }}
 
-      - name: Create venv & install deps (only on cache miss)
+      - name: Create venv and install deps (on cache miss)
         if: steps.venv-cache.outputs.cache-hit != 'true'
         run: |
           set -euo pipefail
@@ -53,13 +53,13 @@ jobs:
           "${VENV_DIR}/bin/python" -m pip install -U pip
           "${VENV_DIR}/bin/pip" install -r requirements.txt
 
-      - name: Configure git for commits
+      - name: Configure git
         run: |
           set -euo pipefail
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-      - name: Run checker long loop (~2 min cadence) + per-iteration commit + Telegram on slot
+      - name: Run checker loop (2 min cadence), commit logs, Telegram on slots
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
@@ -101,7 +101,8 @@ jobs:
               idx=0; total=$(ls -1 chunk_*.txt 2>/dev/null | wc -l | xargs)
               for f in chunk_*.txt; do
                 idx=$((idx+1))
-                printf "[%d/%d] " "$idx" "$total" | cat - "$f" > "${f}.send" && mv "${f}.send" "$f"
+                { printf "[%d/%d] " "$idx" "$total"; cat "$f"; } > "${f}.send"
+                mv "${f}.send" "$f"
                 curl -sS "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
                   --data-urlencode "chat_id=${CHAT_ID}" \
                   --data-urlencode "text@${f}" \
@@ -127,10 +128,8 @@ jobs:
 
           api() { curl -fsS -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" "$@"; }
 
-          Q=$(api "https://api.github.com/repos/${REPO}/actions/workflows/${WF_FILE}/runs?branch=${BRANCH}&status=queued&per_page=1" \
-             | grep -o '"total_count":[0-9]*' | head -1 | cut -d: -f2)
-          I=$(api "https://api.github.com/repos/${REPO}/actions/workflows/${WF_FILE}/runs?branch=${BRANCH}&status=in_progress&per_page=2" \
-             | grep -o '"total_count":[0-9]*' | head -1 | cut -d: -f2)
+          Q=$(api "https://api.github.com/repos/${REPO}/actions/workflows/${WF_FILE}/runs?branch=${BRANCH}&status=queued&per_page=1" | grep -o '"total_count":[0-9]*' | head -1 | cut -d: -f2)
+          I=$(api "https://api.github.com/repos/${REPO}/actions/workflows/${WF_FILE}/runs?branch=${BRANCH}&status=in_progress&per_page=2" | grep -o '"total_count":[0-9]*' | head -1 | cut -d: -f2)
           Q=${Q:-0}; I=${I:-0}
           echo "[SELF-DISPATCH] $(date '+%Y-%m-%d %H:%M:%S %Z') queued=${Q}, in_progress=${I}" | tee -a "$LOG"
 
@@ -139,14 +138,13 @@ jobs:
             exit 0
           fi
 
-          curl -sS -X POST \
-            -H "Authorization: Bearer ${GH_TOKEN}" \
-            -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/${REPO}/actions/workflows/${WF_FILE}/dispatches" \
-            -d "{\"ref\":\"${BRANCH}\"}"
+          printf '%s' "{\"ref\":\"${BRANCH}\"}" > body.json
+          curl -sS -X POST -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" -d @body.json \
+            "https://api.github.com/repos/${REPO}/actions/workflows/${WF_FILE}/dispatches"
+          rm -f body.json
           echo "[SELF-DISPATCH] dispatched new run" | tee -a "$LOG"
 
-      - name: Wait for next run up to 5 min; alert if not started
+      - name: Wait up to 5 min for next run; alert if not started
         if: always()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -164,16 +162,14 @@ jobs:
           check_started() {
             local q i
             q=$(curl -fsS -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" \
-                "https://api.github.com/repos/${REPO}/actions/workflows/${WF_FILE}/runs?branch=${BRANCH}&status=queued&per_page=1" \
-                | grep -o '"total_count":[0-9]*' | head -1 | cut -d: -f2)
+                "https://api.github.com/repos/${REPO}/actions/workflows/${WF_FILE}/runs?branch=${BRANCH}&status=queued&per_page=1" | grep -o '"total_count":[0-9]*' | head -1 | cut -d: -f2)
             i=$(curl -fsS -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" \
-                "https://api.github.com/repos/${REPO}/actions/workflows/${WF_FILE}/runs?branch=${BRANCH}&status=in_progress&per_page=2" \
-                | grep -o '"total_count":[0-9]*' | head -1 | cut -d: -f2)
+                "https://api.github.com/repos/${REPO}/actions/workflows/${WF_FILE}/runs?branch=${BRANCH}&status=in_progress&per_page=2" | grep -o '"total_count":[0-9]*' | head -1 | cut -d: -f2)
             q=${q:-0}; i=${i:-0}
             if [ "$q" -gt 0 ] || [ "$i" -gt 1 ]; then return 0; else return 1; fi
           }
 
-          echo "[WATCHDOG] $(date '+%Y-%m-%d %H:%M:%S %Z') waiting up to 5 min for next run..." | tee -a "$LOG"
+          echo "[WATCHDOG] $(date '+%Y-%m-%d %H:%M:%S %Z') waiting up to 5 minutes for next run..." | tee -a "$LOG"
 
           tries=30
           for n in $(seq 1 $tries); do
@@ -187,20 +183,25 @@ jobs:
           echo "[WATCHDOG] next run NOT detected within 5 minutes" | tee -a "$LOG"
 
           if [ -n "${BOT_TOKEN:-}" ] && [ -n "${CHAT_ID:-}" ]; then
-            TEXT="SAE Checker: следующий запуск не стартовал в течение 5 минут после self-dispatch.
-Ветка: ${BRANCH}
-Репозиторий: ${REPO}
-Текущий run: ${CUR_RUN}
-Время: $(date '+%Y-%m-%d %H:%M:%S %Z')"
+            # build ascii-only text without heredoc
+            MSG_FILE="tg_msg.txt"
+            : > "$MSG_FILE"
+            printf '%s\n' "SAE Checker: next run did NOT start within 5 minutes after self-dispatch." >> "$MSG_FILE"
+            printf '%s\n' "Branch: ${BRANCH}" >> "$MSG_FILE"
+            printf '%s\n' "Repository: ${REPO}" >> "$MSG_FILE"
+            printf '%s\n' "Current run: ${CUR_RUN}" >> "$MSG_FILE"
+            printf '%s\n' "Time: $(date '+%Y-%m-%d %H:%M:%S %Z')" >> "$MSG_FILE"
+
             curl -sS "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
               --data-urlencode "chat_id=${CHAT_ID}" \
-              --data-urlencode "text=${TEXT}" \
+              --data-urlencode "text@${MSG_FILE}" \
               --data "disable_web_page_preview=true" >/dev/null || true
+            rm -f "$MSG_FILE"
           else
             echo "[WATCHDOG] Telegram secrets not set; cannot alert." | tee -a "$LOG"
           fi
 
-      - name: Commit & push logs (final)
+      - name: Commit and push logs (final)
         if: always()
         run: |
           set -euo pipefail
