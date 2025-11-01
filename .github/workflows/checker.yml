@@ -1,64 +1,60 @@
 name: SAE Checker
 
 on:
+  # Запускаем вручную и далее поддерживаем цепочку автозапусков
   workflow_dispatch: {}
 
 permissions:
-  contents: write
-  actions: write
+  contents: write     # чтобы коммитить логи
+  actions: write      # чтобы диспатчить следующий запуск
 
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 360
+    timeout-minutes: 360        # запас по времени на весь job
 
+    # Одновременный запуск: один работает, один — в очереди
     concurrency:
       group: ${{ github.workflow }}-${{ github.ref_name }}
       cancel-in-progress: false
 
+    # Общие переменные окружения
     env:
       TZ: America/Montevideo
       PYTHON_VERSION: "3.11"
       VENV_DIR: .venv
 
     steps:
+      # 1) Берём код
       - name: Checkout
         uses: actions/checkout@v4
 
+      # 2) Ставим Python нужной версии
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
-      - name: Restore pip cache
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ env.PYTHON_VERSION }}-${{ hashFiles('requirements.txt') }}
-          restore-keys: |
-            ${{ runner.os }}-pip-${{ env.PYTHON_VERSION }}-
-
-      - name: Restore venv cache
-        id: venv-cache
-        uses: actions/cache@v4
-        with:
-          path: ${{ env.VENV_DIR }}
-          key: ${{ runner.os }}-venv-${{ env.PYTHON_VERSION }}-${{ hashFiles('requirements.txt') }}
-
-      - name: Create venv and install deps (on cache miss)
-        if: steps.venv-cache.outputs.cache-hit != 'true'
+      # 3) Создаём venv и ставим зависимости (без кэша — проще и надёжнее)
+      - name: Create venv and install deps
         run: |
           set -euo pipefail
           python -m venv "${VENV_DIR}"
           "${VENV_DIR}/bin/python" -m pip install -U pip
-          "${VENV_DIR}/bin/pip" install -r requirements.txt
+          if [ -f requirements.txt ]; then
+            "${VENV_DIR}/bin/pip" install -r requirements.txt
+          else
+            "${VENV_DIR}/bin/pip" install requests
+          fi
 
-      - name: Configure git
+      # 4) Настраиваем автора коммитов
+      - name: Configure git for commits
         run: |
-          set -euo pipefail
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
+      # 5) Основной цикл мониторинга: каждые 2 минуты запускаем checker.py,
+      #    логируем, пушим лог, шлём в Telegram при наличии слотов
       - name: Run checker loop (2 min cadence), commit logs, Telegram on slots
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
@@ -66,54 +62,72 @@ jobs:
         timeout-minutes: 355
         run: |
           set -euo pipefail
+
+          # Путь к дневному логу
           mkdir -p logs
           LOG="logs/$(date +%F).log"
-          SLEEP_SEC=120
-          START_EPOCH=$(date +%s)
-          MAX_MIN=350
 
+          # Функция отправки длинного текста в Telegram чанками
+          send_tg_text() {
+            local file="$1"
+            # режем по ~3500 символов, чтобы не упереться в лимит
+            rm -f chunk_*.txt || true
+            awk -v max=3500 'BEGIN{c=1;l=0;fn=sprintf("chunk_%03d.txt",c)}
+              { line=$0 ORS;
+                if (l + length($0) + 1 > max) { c++; fn=sprintf("chunk_%03d.txt",c); l=0 }
+                printf "%s", line >> fn; l += length($0) + 1
+              }' "$file"
+            shopt -s nullglob
+            i=0; n=$(ls -1 chunk_*.txt 2>/dev/null | wc -l | xargs)
+            for f in chunk_*.txt; do
+              i=$((i+1))
+              { printf "[%d/%d] " "$i" "$n"; cat "$f"; } > "${f}.send"
+              mv "${f}.send" "$f"
+              curl -sS "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
+                --data-urlencode "chat_id=${CHAT_ID}" \
+                --data-urlencode "text@${f}" \
+                --data "disable_web_page_preview=true" >/dev/null || true
+            done
+            rm -f chunk_*.txt
+          }
+
+          # Параметры цикла: раз в 120 сек, всего ~5ч50м (350 минут)
+          SLEEP_SEC=120
+          MAX_MIN=350
+          START_EPOCH=$(date +%s)
           iter=0
+
           while :; do
-            NOW=$(date +%s)
-            ELAPSED_MIN=$(( (NOW - START_EPOCH) / 60 ))
-            if [ "$ELAPSED_MIN" -ge "$MAX_MIN" ]; then
+            now=$(date +%s)
+            elapsed_min=$(( (now - START_EPOCH) / 60 ))
+            [ "$elapsed_min" -ge "$MAX_MIN" ] && {
               echo "Reached ${MAX_MIN} minutes; exiting loop." | tee -a "$LOG"
               break
-            fi
+            }
 
             iter=$((iter+1))
-            echo "===== RUN $(date '+%Y-%m-%d %H:%M:%S %Z') (minute ${ELAPSED_MIN}/${MAX_MIN}, iter ${iter}) =====" | tee -a "$LOG"
-            RUN_OUT="run.out"
+            echo "===== RUN $(date '+%Y-%m-%d %H:%M:%S %Z') (minute ${elapsed_min}/${MAX_MIN}, iter ${iter}) =====" | tee -a "$LOG"
 
+            # Выполняем скрипт и одновременно пишем:
+            # - в дневной лог
+            # - в файл текущего запуска (чтобы проверить, были ли слоты)
+            RUN_OUT="run.out"
             "${VENV_DIR}/bin/python" checker.py | tee -a "$LOG" | tee "$RUN_OUT" >/dev/null
 
+            # Коммитим и пушим лог
             git add -f "$LOG" || true
             git commit -m "Append log: $(date '+%F %T %Z') [iter ${iter}] [skip ci]" || echo "No changes to commit"
             git push || echo "Push failed (network hiccup?)"
 
+            # Если найдены слоты — шлём весь текст RUN_OUT в Telegram
             if [ -n "${BOT_TOKEN:-}" ] && [ -n "${CHAT_ID:-}" ] && grep -q "ЕСТЬ свободные места" "$RUN_OUT"; then
-              rm -f chunk_*.txt || true
-              awk -v max=3500 'BEGIN{c=1;l=0;fn=sprintf("chunk_%03d.txt",c)}
-                {line=$0 ORS; if (l+length($0)+1>max){c++;fn=sprintf("chunk_%03d.txt",c);l=0}
-                 printf "%s", line >> fn; l+=length($0)+1 }' "$RUN_OUT"
-
-              shopt -s nullglob
-              idx=0; total=$(ls -1 chunk_*.txt 2>/dev/null | wc -l | xargs)
-              for f in chunk_*.txt; do
-                idx=$((idx+1))
-                { printf "[%d/%d] " "$idx" "$total"; cat "$f"; } > "${f}.send"
-                mv "${f}.send" "$f"
-                curl -sS "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
-                  --data-urlencode "chat_id=${CHAT_ID}" \
-                  --data-urlencode "text@${f}" \
-                  --data "disable_web_page_preview=true" >/dev/null || echo "Telegram send failed for $f"
-              done
-              rm -f chunk_*.txt
+              send_tg_text "$RUN_OUT"
             fi
 
             sleep "$SLEEP_SEC"
           done
 
+      # 6) Передаём эстафету: ставим следующий запуск в очередь, если его ещё нет
       - name: Self-dispatch next run if none queued
         if: always()
         env:
@@ -123,27 +137,36 @@ jobs:
           WF_FILE: checker.yml
         run: |
           set -euo pipefail
-          LOG="logs/$(date +%F).log"
           mkdir -p logs
+          LOG="logs/$(date +%F).log"
 
           api() { curl -fsS -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" "$@"; }
 
-          Q=$(api "https://api.github.com/repos/${REPO}/actions/workflows/${WF_FILE}/runs?branch=${BRANCH}&status=queued&per_page=1" | grep -o '"total_count":[0-9]*' | head -1 | cut -d: -f2)
-          I=$(api "https://api.github.com/repos/${REPO}/actions/workflows/${WF_FILE}/runs?branch=${BRANCH}&status=in_progress&per_page=2" | grep -o '"total_count":[0-9]*' | head -1 | cut -d: -f2)
+          # Проверяем, есть ли уже queued или второй in_progress
+          Q=$(api "https://api.github.com/repos/${REPO}/actions/workflows/${WF_FILE}/runs?branch=${BRANCH}&status=queued&per_page=1" \
+             | grep -o '"total_count":[0-9]*' | head -1 | cut -d: -f2)
+          I=$(api "https://api.github.com/repos/${REPO}/actions/workflows/${WF_FILE}/runs?branch=${BRANCH}&status=in_progress&per_page=2" \
+             | grep -o '"total_count":[0-9]*' | head -1 | cut -d: -f2)
           Q=${Q:-0}; I=${I:-0}
           echo "[SELF-DISPATCH] $(date '+%Y-%m-%d %H:%M:%S %Z') queued=${Q}, in_progress=${I}" | tee -a "$LOG"
 
+          # Если очередь уже есть — ничего не делаем
           if [ "$Q" -gt 0 ] || [ "$I" -gt 1 ]; then
             echo "[SELF-DISPATCH] skip dispatch (already queued/in_progress)" | tee -a "$LOG"
             exit 0
           fi
 
+          # Иначе ставим новый запуск
           printf '%s' "{\"ref\":\"${BRANCH}\"}" > body.json
-          curl -sS -X POST -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" -d @body.json \
+          curl -sS -X POST \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            -d @body.json \
             "https://api.github.com/repos/${REPO}/actions/workflows/${WF_FILE}/dispatches"
           rm -f body.json
           echo "[SELF-DISPATCH] dispatched new run" | tee -a "$LOG"
 
+      # 7) Сторож: ждём до 5 минут появления следующего запуска; если не стартовал — пишем в лог и шлём алерт
       - name: Wait up to 5 min for next run; alert if not started
         if: always()
         env:
@@ -156,34 +179,37 @@ jobs:
           CUR_RUN: ${{ github.run_number }}
         run: |
           set -euo pipefail
-          LOG="logs/$(date +%F).log"
           mkdir -p logs
+          LOG="logs/$(date +%F).log"
 
-          check_started() {
+          # Утилитарная проверка статусов через API
+          started() {
             local q i
             q=$(curl -fsS -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" \
-                "https://api.github.com/repos/${REPO}/actions/workflows/${WF_FILE}/runs?branch=${BRANCH}&status=queued&per_page=1" | grep -o '"total_count":[0-9]*' | head -1 | cut -d: -f2)
+                "https://api.github.com/repos/${REPO}/actions/workflows/${WF_FILE}/runs?branch=${BRANCH}&status=queued&per_page=1" \
+                | grep -o '"total_count":[0-9]*' | head -1 | cut -d: -f2)
             i=$(curl -fsS -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" \
-                "https://api.github.com/repos/${REPO}/actions/workflows/${WF_FILE}/runs?branch=${BRANCH}&status=in_progress&per_page=2" | grep -o '"total_count":[0-9]*' | head -1 | cut -d: -f2)
+                "https://api.github.com/repos/${REPO}/actions/workflows/${WF_FILE}/runs?branch=${BRANCH}&status=in_progress&per_page=2" \
+                | grep -o '"total_count":[0-9]*' | head -1 | cut -d: -f2)
             q=${q:-0}; i=${i:-0}
+            # next run считается «обнаружен», если уже queued или есть второй in_progress
             if [ "$q" -gt 0 ] || [ "$i" -gt 1 ]; then return 0; else return 1; fi
           }
 
           echo "[WATCHDOG] $(date '+%Y-%m-%d %H:%M:%S %Z') waiting up to 5 minutes for next run..." | tee -a "$LOG"
 
-          tries=30
-          for n in $(seq 1 $tries); do
-            if check_started; then
+          for _ in $(seq 1 30); do
+            if started; then
               echo "[WATCHDOG] next run detected" | tee -a "$LOG"
               exit 0
             fi
             sleep 10
           done
 
+          # Не стартовал — логируем и шлём уведомление (если заданы секреты)
           echo "[WATCHDOG] next run NOT detected within 5 minutes" | tee -a "$LOG"
 
           if [ -n "${BOT_TOKEN:-}" ] && [ -n "${CHAT_ID:-}" ]; then
-            # build ascii-only text without heredoc
             MSG_FILE="tg_msg.txt"
             : > "$MSG_FILE"
             printf '%s\n' "SAE Checker: next run did NOT start within 5 minutes after self-dispatch." >> "$MSG_FILE"
@@ -201,7 +227,8 @@ jobs:
             echo "[WATCHDOG] Telegram secrets not set; cannot alert." | tee -a "$LOG"
           fi
 
-      - name: Commit and push logs (final)
+      # 8) Финальный пуш логов (на всякий случай)
+      - name: Commit & push logs (final)
         if: always()
         run: |
           set -euo pipefail
