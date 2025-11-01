@@ -6667,3 +6667,8 @@
 {"textoAgendaPaso2":"","textoRecursoPaso2":null,"disponibilidades":[]}
 ------------------------------------
 [20:53:04] [REQ#2 agenda=7 recurso=214] Нет свободных мест.
+===== RUN 2025-10-31 21:50:46 -03 (minute 0/350, iter 1) =====
+[SELF-DISPATCH] 2025-10-31 21:50:46 -03 queued=0, in_progress=0
+[SELF-DISPATCH] dispatched new run
+[WATCHDOG] 2025-10-31 21:50:46 -03 waiting up to 5 minutes for next run...
+[WATCHDOG] next run NOT detected within 5 minutes
